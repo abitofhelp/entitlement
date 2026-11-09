@@ -1,0 +1,105 @@
+-- ==========================================================================
+-- Bootstrap Layer GPR - Main Executable Build Configuration
+-- ==========================================================================
+-- Copyright (c) 2025 Michael Gardner, A Bit of Help, Inc.
+-- SPDX-License-Identifier: BSD-3-Clause
+--
+-- Purpose:
+--   Builds the bootstrap layer as the main executable project.
+--   Can depend on all layers for dependency injection wiring.
+--   This is the composition root that produces the final executable.
+-- ==========================================================================
+
+with "../../config/entitlement_config.gpr";
+with "../../entitlement_shared_config.gpr";
+with "../domain/domain.gpr";
+with "../application/application.gpr";
+with "../infrastructure/infrastructure.gpr";
+with "../presentation/presentation.gpr";
+with "../root/root.gpr";
+
+project Bootstrap is
+
+   --  Platform detection for linker configuration
+   type OS_Type is ("macos", "linux", "windows");
+   OS : OS_Type := Entitlement_Config.Alire_Host_OS;
+
+   --  Include bootstrap sources and main entry point
+   for Source_Dirs use (".", "cli", "..");
+   for Object_Dir use "../../obj/bootstrap";
+   for Exec_Dir use "../../bin";
+   for Main use ("entitlement_main.adb");
+
+   --  ======================================================================
+   --  Bootstrap: Composition Root / Aggregate Root
+   --  ======================================================================
+   --
+   --  WHY: Bootstrap is the ONLY place where all layers meet.
+   --       It performs dependency injection via generic instantiation.
+   --       As the aggregate root, it orchestrates the entire application
+   --       lifecycle and serves as the single entry point.
+   --
+   --  ARCHITECTURE:
+   --    Bootstrap depends on ALL layers (special case - outermost)
+   --    - Domain: Core business logic
+   --    - Application: Use cases and ports
+   --    - Infrastructure: Adapter implementations
+   --    - Presentation: CLI handlers
+   --
+   --  RESPONSIBILITIES:
+   --    - Instantiate generics with concrete implementations
+   --    - Wire all layers together (dependency injection)
+   --    - Produce the final executable
+   --    - Serve as the aggregate root for application startup
+   --
+   --  VALIDATED BY: scripts/arch_guard.py
+   --  ======================================================================
+
+   package Compiler renames Entitlement_Shared_Config.Compiler;
+   package Binder renames Entitlement_Shared_Config.Binder;
+   package Builder is
+      for Default_Switches ("Ada") use
+        Entitlement_Shared_Config.Builder'Default_Switches ("Ada");
+      for Executable ("entitlement_main.adb") use "entitlement";
+   end Builder;
+
+   --  ======================================================================
+   --  Linker Package: Platform-Specific Configuration
+   --  ======================================================================
+   --
+   --  All platforms:
+   --    -lgnarl   : GNAT runtime library for tasking
+   --
+   --  Unix-like (macOS, Linux):
+   --    -lpthread : POSIX threads
+   --
+   --  Dead code elimination:
+   --    macOS   : -Wl,-dead_strip (Apple ld64 linker)
+   --    Linux   : -Wl,--gc-sections (GNU ld linker)
+   --    Windows : -Wl,--gc-sections (MinGW GNU ld, no -lpthread)
+   --  ======================================================================
+   package Linker is
+      case OS is
+         when "macos" =>
+            for Switches ("Ada") use (
+               "-lgnarl",
+               "-lpthread",
+               "-Wl,-dead_strip"
+            );
+
+         when "windows" =>
+            for Switches ("Ada") use (
+               "-lgnarl",
+               "-Wl,--gc-sections"
+            );
+
+         when "linux" =>
+            for Switches ("Ada") use (
+               "-lgnarl",
+               "-lpthread",
+               "-Wl,--gc-sections"
+            );
+      end case;
+   end Linker;
+
+end Bootstrap;

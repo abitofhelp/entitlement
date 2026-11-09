@@ -1,0 +1,508 @@
+# =============================================================================
+# Project Makefile
+# =============================================================================
+# Project: entitlement
+# Purpose: Hexagonal architecture application with port/adapter pattern
+#
+# This Makefile provides:
+#   - Build targets (build, clean, rebuild, run)
+#   - Test infrastructure (test, test-coverage, test-python, test-windows)
+#   - Quality targets (check, check-arch, stats)
+#   - Development tools (deps, refresh, install-tools, compress)
+# =============================================================================
+
+PROJECT_NAME := entitlement
+
+.PHONY: all build build-dev build-opt build-release build-tests check check-arch \
+        clean clean-clutter clean-coverage clean-deep compress deps \
+		help prereqs rebuild refresh run stats test test-all test-coverage test-framework \
+		test-integration test-unit test-e2e test-python test-windows install-tools build-coverage-runtime \
+		submodule-init submodule-update submodule-status \
+		format format-all format-src format-tests \
+		docs-formal
+
+# =============================================================================
+# OS Detection
+# =============================================================================
+
+UNAME := $(shell uname -s)
+
+# =============================================================================
+# Colors for Output
+# =============================================================================
+
+GREEN := \033[0;32m
+YELLOW := \033[0;33m
+RED := \033[0;31m
+BLUE := \033[0;34m
+ORANGE := \033[38;5;208m
+CYAN := \033[0;36m
+BOLD := \033[1m
+NC := \033[0m
+
+# =============================================================================
+# Tool Paths
+# =============================================================================
+
+ALR := alr
+GPRBUILD := gprbuild
+GNATFORMAT := gnatformat
+GNATDOC := gnatdoc
+ADAFMT := adafmt
+PYTHON3 := python3
+
+# =============================================================================
+# Tool Flags
+# =============================================================================
+# NOTE: --no-indirect-imports is NOT needed. Architecture is enforced via
+#       Stand-Alone Library with explicit Library_Interface in application.gpr
+#       which prevents transitive Domain access from Presentation layer.
+# Build flags (compiler/linker options only)
+# FIXME: -XGNATCOLL_ICONV_OPT= is needed on Linux where iconv is part of glibc
+# (no separate -liconv library). Without this, the linker fails with
+# "cannot find -liconv". On macOS/FreeBSD, the flag is harmless.
+ALR_BUILD_FLAGS   := -XGNATCOLL_ICONV_OPT= -j0
+ALR_RELEASE_FLAGS := -XGNATCOLL_ICONV_OPT= -XLIBRARY_TYPE=static -j0
+
+# Build wrapper: filters output to diagnostics only while propagating the
+# build exit code. See scripts/python/shared/makefile/alr_build.py.
+ALR_BUILD_WRAPPER := $(PYTHON3) scripts/python/shared/makefile/alr_build.py
+# =============================================================================
+# Directories
+# =============================================================================
+
+BUILD_DIR := obj
+BIN_DIR := bin
+DOCS_DIR := docs/api
+COVERAGE_DIR := coverage
+# Get the directory of the currently executing Makefile.
+# This assumes the Makefile is the last one in the list.
+MAKEFILE_DIR := $(dir $(lastword $(MAKEFILE_LIST)))
+PROJECT_DIR := $(MAKEFILE_DIR)/$(PROJECT_NAME)
+TEST_DIR := test
+
+# Directories to format (application layers + tests)
+FORMAT_DIRS := \
+				$(wildcard src/application) \
+  		       	$(wildcard src/bootstrap) \
+               	$(wildcard src/domain) \
+			   	$(wildcard src/infrastructure) \
+			   	$(wildcard src/presentation) \
+               	$(wildcard $(TEST_DIR))
+
+# =============================================================================
+# Default Target
+# =============================================================================
+
+all: build
+
+# =============================================================================
+# Help Target
+# =============================================================================
+
+help: ## Display this help message
+	@echo "$(CYAN)$(BOLD)╔══════════════════════════════════════════════════╗$(NC)"
+	@echo "$(CYAN)$(BOLD)║  Entitlement - Ada 2022 Application               ║$(NC)"
+	@echo "$(CYAN)$(BOLD)╚══════════════════════════════════════════════════╝$(NC)"
+	@echo " "
+	@echo "$(YELLOW)Build Commands:$(NC)"
+	@echo "  build              - Build project (development mode)"
+	@echo "  build-dev          - Build with development flags"
+	@echo "  build-opt          - Build with validation profile"
+	@echo "  build-release      - Build in release mode"
+	@echo "  build-tests        - Build all test executables"
+	@echo "  run                - Build and run the entitlement"
+	@echo "  clean              - Clean build artifacts"
+	@echo "  clean-clutter      - Remove temporary files and backups"
+	@echo "  clean-coverage     - Clean coverage data"
+	@echo "  clean-deep         - Deep clean (includes Alire cache)"
+	@echo "  compress           - Create compressed source archive (tar.gz)"
+	@echo "  rebuild            - Clean and rebuild"
+	@echo ""
+	@echo "$(YELLOW)Testing Commands:$(NC)"
+	@echo "  test               - Run comprehensive test suite (main runner)"
+	@echo "  test-unit          - Run unit tests only"
+	@echo "  test-integration   - Run integration tests only"
+	@echo "  test-e2e           - Run E2E tests only"
+	@echo "  test-all           - Run all test executables"
+	@echo "  test-framework     - Run all test suites (unit + integration + e2e)"
+	@echo "  test-python        - Run Python script tests (arch_guard.py validation)"
+	@echo "  test-coverage      - Run tests with coverage analysis"
+	@echo "  test-windows       - Trigger Windows CI validation on GitHub"
+	@echo ""
+	@echo "$(YELLOW)Quality & Architecture Commands:$(NC)"
+	@echo "  check              - Run static analysis"
+	@echo "  check-arch         - Validate hexagonal architecture boundaries"
+	@echo "  format-src         - Auto-format source code only"
+	@echo "  format-tests       - Auto-format test code only"
+	@echo "  format-all         - Auto-format all code"
+	@echo "  format             - Alias for format-all"
+	@echo "  stats              - Display project statistics by layer"
+	@echo ""
+	@echo "$(YELLOW)Utility Commands:$(NC)"
+	@echo "  deps                    - Show dependency information"
+	@echo "  prereqs                 - Verify prerequisites are satisfied"
+	@echo "  refresh                 - Refresh Alire dependencies"
+	@echo "  install-tools           - Install development tools (GMP, gcovr, gnatformat)"
+	@echo "  build-coverage-runtime  - Build GNATcoverage runtime library"
+	@echo ""
+	@echo "$(YELLOW)Documentation Commands:$(NC)"
+	@echo "  docs-formal        - Compile Typst formal docs (SRS, SDS, STG) to PDF"
+	@echo ""
+	@echo "$(YELLOW)Workflow Shortcuts:$(NC)"
+	@echo "  all                - Build project (default)"
+	@echo ""
+	@echo "$(YELLOW)Submodule Commands:$(NC)"
+	@echo "  submodule-init     - Initialize submodules after fresh clone"
+	@echo "  submodule-update   - Pull latest from all submodule repos"
+	@echo "  submodule-status   - Show submodule commit status"
+
+# =============================================================================
+# Build Commands
+# =============================================================================
+
+prereqs:
+	@echo "$(GREEN)✓ All prerequisites satisfied$(NC)"
+
+build: build-dev
+
+build-dev: check-arch prereqs
+	@echo "$(GREEN)Building $(PROJECT_NAME) (development mode)...$(NC)"
+	@$(ALR_BUILD_WRAPPER) $(ALR) build --development -- $(ALR_BUILD_FLAGS)
+	@echo "$(GREEN)✓ Development build complete$(NC)"
+	@echo "$(GREEN)  Output: $(BIN_DIR)/entitlement$(NC)"
+
+build-opt: check-arch prereqs
+	@echo "$(GREEN)Building $(PROJECT_NAME) (validation profile)...$(NC)"
+	@$(ALR_BUILD_WRAPPER) $(ALR) build --validation -- $(ALR_BUILD_FLAGS)
+	@echo "$(GREEN)✓ Validation build complete$(NC)"
+	@echo "$(GREEN)  Output: $(BIN_DIR)/entitlement$(NC)"
+
+build-release: check-arch prereqs
+	@echo "$(GREEN)Building $(PROJECT_NAME) (release mode, static linking)...$(NC)"
+	@$(ALR_BUILD_WRAPPER) $(ALR) build --release -- $(ALR_RELEASE_FLAGS)
+	@echo "$(GREEN)✓ Release build complete$(NC)"
+	@echo "$(GREEN)  Output: $(BIN_DIR)/entitlement$(NC)"
+
+build-tests: check-arch prereqs
+	@echo "$(GREEN)Building test suites...$(NC)"
+	@if [ -f "$(TEST_DIR)/unit/unit_tests.gpr" ]; then \
+		$(ALR_BUILD_WRAPPER) $(ALR) exec -- $(GPRBUILD) -P $(TEST_DIR)/unit/unit_tests.gpr -p $(ALR_BUILD_FLAGS) \
+			&& echo "$(GREEN)✓ Unit tests built$(NC)" \
+			|| { echo "$(RED)✗ Unit test build failed$(NC)"; exit 1; }; \
+	else \
+		echo "$(YELLOW)Unit test project not found$(NC)"; \
+	fi
+	@if [ -f "$(TEST_DIR)/integration/integration_tests.gpr" ]; then \
+		$(ALR_BUILD_WRAPPER) $(ALR) exec -- $(GPRBUILD) -P $(TEST_DIR)/integration/integration_tests.gpr -p $(ALR_BUILD_FLAGS) \
+			&& echo "$(GREEN)✓ Integration tests built$(NC)" \
+			|| { echo "$(RED)✗ Integration test build failed$(NC)"; exit 1; }; \
+	else \
+		echo "$(YELLOW)Integration test project not found$(NC)"; \
+	fi
+	@if [ -f "$(TEST_DIR)/e2e/e2e_tests.gpr" ]; then \
+		$(ALR_BUILD_WRAPPER) $(ALR) exec -- $(GPRBUILD) -P $(TEST_DIR)/e2e/e2e_tests.gpr -p $(ALR_BUILD_FLAGS) \
+			&& echo "$(GREEN)✓ E2E tests built$(NC)" \
+			|| { echo "$(RED)✗ E2E test build failed$(NC)"; exit 1; }; \
+	else \
+		echo "$(YELLOW)E2E test project not found$(NC)"; \
+	fi
+
+clean:
+	@echo "$(YELLOW)Cleaning project build artifacts (keeps dependencies)...$(NC)"
+	@# Use gprclean WITHOUT -r to clean only our project, not dependencies
+	@$(ALR) exec -- gprclean -P $(PROJECT_NAME).gpr -q 2>/dev/null || true
+	@$(ALR) exec -- gprclean -P $(TEST_DIR)/unit/unit_tests.gpr -q 2>/dev/null || true
+	@$(ALR) exec -- gprclean -P $(TEST_DIR)/integration/integration_tests.gpr -q 2>/dev/null || true
+	@rm -rf $(BUILD_DIR) $(BIN_DIR) lib $(TEST_DIR)/bin $(TEST_DIR)/obj
+	@# Delete platform-specific lock file (see README: Platform Build Constraint)
+	@rm -f alire/alire.lock
+	@find . -name "*.backup" -delete 2>/dev/null || true
+	@if [ -d "assemblies" ]; then \
+		$(ALR) exec -- gprclean -P assemblies/standard/standard.gpr -q 2>/dev/null || true; \
+		rm -rf assemblies/*/obj assemblies/*/lib 2>/dev/null || true; \
+		echo "$(GREEN)✓ Assemblies cleaned$(NC)"; \
+	fi
+	@echo "$(GREEN)✓ Project artifacts cleaned (dependencies preserved for fast rebuild)$(NC)"
+
+clean-deep:
+	@echo "$(YELLOW)Deep cleaning ALL artifacts including dependencies...$(NC)"
+	@echo "$(YELLOW)⚠️  This will require rebuilding GNATCOLL, XMLAda, etc. (slow!)$(NC)"
+	@$(ALR) clean
+	@rm -rf $(BUILD_DIR) $(BIN_DIR) lib $(TEST_DIR)/bin $(TEST_DIR)/obj
+	@find . -name "*.backup" -delete 2>/dev/null || true
+	@if [ -d "assemblies" ]; then \
+		rm -rf assemblies/*/obj assemblies/*/lib 2>/dev/null || true; \
+		echo "$(GREEN)✓ Assemblies cleaned$(NC)"; \
+	fi
+	@echo "$(GREEN)✓ Deep clean complete (next build will be slow)$(NC)"
+
+clean-coverage:
+	@echo "$(YELLOW)Cleaning coverage artifacts...$(NC)"
+	@find . -name "*.srctrace" -delete 2>/dev/null || true
+	@find . -name "*.traces" -delete 2>/dev/null || true
+	@find . -name "*.sid" -delete 2>/dev/null || true
+	@rm -rf coverage/ 2>/dev/null || true
+	@rm -rf gnatcov-instr/ 2>/dev/null || true
+	@echo "$(GREEN)✓ Coverage artifacts cleaned$(NC)"
+
+clean-clutter: ## Remove temporary files, backups, and clutter
+	@echo "$(CYAN)Cleaning temporary files and clutter...$(NC)"
+	@$(PYTHON3) scripts/python/shared/makefile/cleanup_temp_files.py
+	@echo "$(GREEN)✓ Temporary files removed$(NC)"
+
+compress:
+	@echo "$(CYAN)Creating compressed source archive...$(NC)"
+	git archive --format=tar.gz -o "$(PROJECT_NAME).tar.gz" HEAD
+	@echo "$(GREEN)✓ Archive created: $(PROJECT_NAME).tar.gz$(NC)"
+
+rebuild: clean build
+
+run: build ## Build and run the entitlement
+	@echo "$(GREEN)Running entitlement...$(NC)"
+	@./bin/entitlement World
+
+# =============================================================================
+# Testing Commands
+# =============================================================================
+
+test: test-all
+
+test-all: build build-tests
+	@echo "$(GREEN)Running all test executables...$(NC)"
+	@failed=0; \
+	if [ -d "$(TEST_DIR)/bin" ]; then \
+		for test in $(TEST_DIR)/bin/*_runner; do \
+			if [ -x "$$test" ] && [ -f "$$test" ]; then \
+				echo "$(CYAN)Running $$test...$(NC)"; \
+				$$test || failed=1; \
+				echo ""; \
+			fi; \
+		done; \
+	else \
+		echo "$(YELLOW)No test executables found in $(TEST_DIR)/bin$(NC)"; \
+	fi; \
+	if [ $$failed -eq 0 ]; then \
+		echo ""; \
+		echo "\033[1;92m########################################"; \
+		echo "###                                  ###"; \
+		echo "###   ALL TEST SUITES: SUCCESS      ###"; \
+		echo "###   All tests passed!              ###"; \
+		echo "###                                  ###"; \
+		echo "########################################\033[0m"; \
+		echo ""; \
+	else \
+		echo ""; \
+		echo "\033[1;91m########################################"; \
+		echo "###                                  ###"; \
+		echo "###   ALL TEST SUITES: FAILURE      ###"; \
+		echo "###   Some tests failed!             ###"; \
+		echo "###                                  ###"; \
+		echo "########################################\033[0m"; \
+		echo ""; \
+		exit 1; \
+	fi
+
+test-unit: build build-tests
+	@echo "$(GREEN)Running unit tests...$(NC)"
+	@if [ -f "$(TEST_DIR)/bin/unit_runner" ]; then \
+		$(TEST_DIR)/bin/unit_runner; \
+		if [ $$? -eq 0 ]; then \
+			echo "$(GREEN)✓ Unit tests passed$(NC)"; \
+		else \
+			echo "$(RED)✗ Unit tests failed$(NC)"; \
+			exit 1; \
+		fi; \
+	else \
+		echo "$(YELLOW)Unit test runner not found at $(TEST_DIR)/bin/unit_runner$(NC)"; \
+		exit 1; \
+	fi
+
+test-integration: build build-tests
+	@echo "$(GREEN)Running integration tests...$(NC)"
+	@if [ -f "$(TEST_DIR)/bin/integration_runner" ]; then \
+		$(TEST_DIR)/bin/integration_runner; \
+		if [ $$? -eq 0 ]; then \
+			echo "$(GREEN)✓ Integration tests passed$(NC)"; \
+		else \
+			echo "$(RED)✗ Integration tests failed$(NC)"; \
+			exit 1; \
+		fi; \
+	else \
+		echo "$(YELLOW)Integration test runner not found at $(TEST_DIR)/bin/integration_runner$(NC)"; \
+		exit 1; \
+	fi
+
+test-e2e: build build-tests
+	@echo "$(GREEN)Running E2E tests...$(NC)"
+	@if [ -f "$(TEST_DIR)/bin/e2e_runner" ]; then \
+		$(TEST_DIR)/bin/e2e_runner; \
+		if [ $$? -eq 0 ]; then \
+			echo "$(GREEN)✓ E2E tests passed$(NC)"; \
+		else \
+			echo "$(RED)✗ E2E tests failed$(NC)"; \
+			exit 1; \
+		fi; \
+	else \
+		echo "$(YELLOW)E2E test runner not found at $(TEST_DIR)/bin/e2e_runner$(NC)"; \
+		exit 1; \
+	fi
+
+test-framework: test-unit test-integration test-e2e ## Run all test suites
+	@echo "$(GREEN)$(BOLD)✓ All test suites completed$(NC)"
+
+test-coverage: ## Run tests with GNATcoverage analysis
+	@echo "$(GREEN)Running tests with GNATcoverage analysis...$(NC)"
+	@$(PYTHON3) scripts/python/shared/makefile/coverage_ada.py
+
+# =============================================================================
+# Quality & Code Formatting Commands
+# =============================================================================
+
+check:
+	@echo "$(GREEN)Running code checks...$(NC)"
+	@$(ALR_BUILD_WRAPPER) $(ALR) build --development -- $(ALR_BUILD_FLAGS)
+	@echo "$(GREEN)✓ Code checks complete$(NC)"
+
+check-arch: ## Validate hexagonal architecture boundaries
+	@echo "$(GREEN)Validating architecture boundaries...$(NC)"
+	@PYTHONPATH=scripts/python/shared $(PYTHON3) -m arch_guard --project-root . && \
+		echo "$(GREEN)✓ Architecture validation passed$(NC)" || \
+		(echo "$(RED)✗ Architecture validation failed$(NC)"; exit 1)
+
+test-python: ## Run Python script tests (arch_guard.py validation)
+	@echo "$(GREEN)Running Python script tests...$(NC)"
+	@cd test/scripts/python/shared && $(PYTHON3) -m pytest -v
+	@echo "$(GREEN)✓ Python tests complete$(NC)"
+
+test-windows: ## Trigger Windows CI validation on GitHub Actions
+	@echo "$(CYAN)Triggering Windows CI validation...$(NC)"
+	@if [ ! -f ".github/workflows/windows-release.yml" ]; then \
+		echo "$(RED)✗ Windows workflow not found$(NC)"; \
+		exit 1; \
+	fi
+	@if ! command -v gh >/dev/null 2>&1; then \
+		echo "$(RED)✗ GitHub CLI (gh) not installed$(NC)"; \
+		echo "  Install from: https://cli.github.com/"; \
+		exit 1; \
+	fi
+	@REF=$$(git rev-parse HEAD); \
+	echo "$(CYAN)  Ref: $${REF:0:8}$(NC)"; \
+	gh workflow run windows-release.yml -f version=dev -f ref=$$REF; \
+	echo "$(GREEN)✓ Workflow triggered$(NC)"; \
+	echo ""; \
+	echo "$(YELLOW)Waiting for workflow to start...$(NC)"; \
+	sleep 5; \
+	RUN_ID=$$(gh run list --workflow=windows-release.yml --limit=1 --json databaseId -q '.[0].databaseId'); \
+	if [ -n "$$RUN_ID" ]; then \
+		echo "$(CYAN)  Run ID: $$RUN_ID$(NC)"; \
+		echo "$(YELLOW)Watching workflow (Ctrl+C to detach)...$(NC)"; \
+		gh run watch $$RUN_ID --exit-status && \
+			echo "$(GREEN)$(BOLD)✓ Windows validation passed$(NC)" || \
+			(echo "$(RED)$(BOLD)✗ Windows validation failed$(NC)" && exit 1); \
+	else \
+		echo "$(RED)✗ Could not find workflow run$(NC)"; \
+		exit 1; \
+	fi
+
+
+format-src: ## Format source code
+	@echo "$(GREEN)Formatting source code...$(NC)"
+	@$(ADAFMT) -j0 --write src/
+	@echo "$(GREEN)✓ Source code formatted$(NC)"
+
+format-tests: ## Format test code
+	@echo "$(GREEN)Formatting test code...$(NC)"
+	@$(ADAFMT) -j0 --write $(TEST_DIR)/
+	@echo "$(GREEN)✓ Test code formatted$(NC)"
+
+format-all: format-src format-tests ## Format all code
+	@echo "$(GREEN)✓ All code formatting complete$(NC)"
+
+format: format-all ## Alias for format-all
+
+
+# =============================================================================
+# Development Commands
+# =============================================================================
+
+stats:
+	@echo "$(CYAN)$(BOLD)Project Statistics for $(PROJECT_NAME)$(NC)"
+	@echo "$(YELLOW)════════════════════════════════════════$(NC)"
+	@echo ""
+	@echo "Ada Source Files by Layer:"
+	@echo "  Domain specs:          $$(find src/domain -name "*.ads" 2>/dev/null | wc -l | tr -d ' ')"
+	@echo "  Domain bodies:         $$(find src/domain -name "*.adb" 2>/dev/null | wc -l | tr -d ' ')"
+	@echo "  Application specs:     $$(find src/application -name "*.ads" 2>/dev/null | wc -l | tr -d ' ')"
+	@echo "  Application bodies:    $$(find src/application -name "*.adb" 2>/dev/null | wc -l | tr -d ' ')"
+	@echo "  Infrastructure specs:  $$(find src/infrastructure -name "*.ads" 2>/dev/null | wc -l | tr -d ' ')"
+	@echo "  Infrastructure bodies: $$(find src/infrastructure -name "*.adb" 2>/dev/null | wc -l | tr -d ' ')"
+	@echo "  Presentation specs:    $$(find src/presentation -name "*.ads" 2>/dev/null | wc -l | tr -d ' ')"
+	@echo "  Presentation bodies:   $$(find src/presentation -name "*.adb" 2>/dev/null | wc -l | tr -d ' ')"
+	@echo "  Bootstrap specs:       $$(find src/bootstrap -name "*.ads" 2>/dev/null | wc -l | tr -d ' ')"
+	@echo "  Bootstrap bodies:      $$(find src/bootstrap -name "*.adb" 2>/dev/null | wc -l | tr -d ' ')"
+	@echo ""
+	@echo "Lines of Code:"
+	@find src/application src/domain src/infrastructure src/presentation src/bootstrap -name "*.ads" -o -name "*.adb" 2>/dev/null | \
+	  xargs wc -l 2>/dev/null | tail -1 | awk '{printf "  Total: %d lines\n", $$1}' || echo "  Total: 0 lines"
+	@echo ""
+	@echo "Build Artifacts:"
+	@if [ -f "./bin/entitlement" ]; then \
+		echo "  Binary: $$(ls -lh ./bin/entitlement 2>/dev/null | awk '{print $$5}')"; \
+	else \
+		echo "  No binary found (run 'make build')"; \
+	fi
+
+# =============================================================================
+# Advanced Targets
+# =============================================================================
+
+deps: ## Display project dependencies
+	@echo "$(CYAN)Project dependencies from alire.toml:$(NC)"
+	@grep -A 10 "\[\[depends-on\]\]" alire.toml || echo "$(YELLOW)No dependencies found$(NC)"
+	@echo ""
+	@echo "$(CYAN)Alire dependency tree:$(NC)"
+	@$(ALR) show --solve || echo "$(YELLOW)Could not resolve dependencies$(NC)"
+
+refresh: ## Refresh Alire dependencies
+	@echo "$(CYAN)Refreshing Alire dependencies...$(NC)"
+	@$(ALR) update
+	@echo "$(GREEN)✓ Dependencies refreshed$(NC)"
+
+install-tools: ## Install development tools (GMP, gcovr, gnatformat)
+	@echo "$(CYAN)Installing development tools...$(NC)"
+	@$(PYTHON3) scripts/python/shared/makefile/install_tools.py
+	@echo "$(GREEN)✓ Tool installation complete$(NC)"
+
+build-coverage-runtime: ## Force rebuild GNATcoverage runtime library
+	@echo "$(CYAN)Rebuilding GNATcoverage runtime...$(NC)"
+	@$(PYTHON3) scripts/python/shared/makefile/coverage_ada.py --rebuild-runtime --unit-only
+	@echo "$(GREEN)✓ GNATcov runtime rebuilt (run 'make test-coverage' for full analysis)$(NC)"
+
+.DEFAULT_GOAL := help
+
+
+## ---------------------------------------------------------------------------
+## Documentation
+## ---------------------------------------------------------------------------
+
+docs-formal: ## Compile Typst formal docs (SRS, SDS, STG) to PDF
+	@python3 scripts/python/shared/makefile/compile_formal_docs.py
+
+## ---------------------------------------------------------------------------
+## Submodule Management
+## ---------------------------------------------------------------------------
+
+submodule-init: ## Initialize submodules after fresh clone
+	git submodule update --init --recursive
+
+submodule-update: ## Pull latest from all submodule repos
+	git submodule update --remote --merge
+	@echo ""
+	@echo "Submodules updated. Review changes, then run:"
+	@echo "  git add docs scripts/python/shared test/scripts/python/shared"
+	@echo "  git commit -m 'chore: update submodules'"
+	@echo "  git push"
+
+submodule-status: ## Show submodule commit status
+	git submodule status

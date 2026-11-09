@@ -1,0 +1,36 @@
+-- ===========================================================================
+-- unit_tests.gpr - Unit Test Suite for Entitlement
+-- ===========================================================================
+-- Purpose:
+--   Unit test project for testing domain and application layers.
+--   Inherits settings from entitlement_shared_config.gpr for consistency.
+--
+-- Build: alr exec -- gprbuild -P test/unit/unit_tests.gpr -p
+--        make test-unit
+-- ===========================================================================
+
+with "../../entitlement_shared_config.gpr";
+with "../../config/entitlement_config.gpr";
+with "../../src/domain/domain.gpr";
+with "../../src/application/application.gpr";
+with "../../src/infrastructure/infrastructure.gpr";
+with "../../src/version/version.gpr";
+with "../../src/root/root.gpr";
+
+project Unit_Tests is
+
+   for Source_Dirs use (".", "../common");
+   for Object_Dir use "../../obj/test/unit";
+   for Exec_Dir use "../bin";
+
+   --  Only the runner is Main; individual tests are procedures it calls
+   for Main use ("unit_runner.adb");
+
+   package Compiler renames Entitlement_Shared_Config.Compiler;
+   package Binder renames Entitlement_Shared_Config.Binder;
+
+   package Builder is
+      for Switches ("Ada") use ("-g");  -- Debug symbols
+   end Builder;
+
+end Unit_Tests;

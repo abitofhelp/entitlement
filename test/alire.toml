@@ -1,0 +1,21 @@
+name = "entitlement_tests"
+description = "Test suite for entitlement"
+version = "2.0.1"
+authors = ["Michael Gardner"]
+maintainers = ["Michael Gardner <mike@abitofhelp.com>"]
+licenses = "BSD-3-Clause"
+
+# This crate is not meant to be published
+auto-gpr-with = false
+
+# Reference the actual GPR project files
+project-files = ["unit/unit_tests.gpr", "integration/integration_tests.gpr", "e2e/e2e_tests.gpr"]
+
+[[depends-on]]
+entitlement = "*"
+
+[[depends-on]]
+gnatcov = "^22.0.1"
+
+[[pins]]
+entitlement = { path = ".." }

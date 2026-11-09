@@ -1,0 +1,162 @@
+# =============================================================================
+# Windows Release Validation Workflow
+# =============================================================================
+# Purpose:
+#   Pre-flight check for Windows compatibility during release preparation.
+#   Called by release.py prepare script BEFORE tags are created.
+#   Development is done on macOS; this workflow ensures Windows compatibility.
+#
+# Triggers:
+#   - Manual dispatch only (called by release.py prepare)
+#   - Can also be triggered manually from GitHub Actions UI for testing
+#
+# Tests:
+#   - Application builds on Windows
+#   - All unit tests pass on Windows
+#   - All integration tests pass on Windows
+#   - All e2e tests pass on Windows
+# =============================================================================
+
+name: Windows Release Validation
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version being validated (e.g., 1.0.0)'
+        required: false
+        default: 'dev'
+      ref:
+        description: 'Git ref to checkout (branch, tag, or SHA)'
+        required: false
+        default: ''
+
+jobs:
+  windows-validation:
+    name: Windows Build & Test
+    runs-on: windows-latest
+
+    steps:
+      # -----------------------------------------------------------------------
+      # Checkout
+      # -----------------------------------------------------------------------
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.ref || github.ref }}
+          submodules: recursive
+
+      # -----------------------------------------------------------------------
+      # Setup Alire
+      # -----------------------------------------------------------------------
+      - name: Setup Alire
+        uses: alire-project/setup-alire@v3
+        with:
+          version: 2.0.2
+
+      # -----------------------------------------------------------------------
+      # Replace local pin with GitHub URL pin for CI
+      # -----------------------------------------------------------------------
+      - name: Update functional pin for CI
+        shell: bash
+        run: |
+          # Replace local path pin with GitHub URL pin (v3.0.0 tag commit SHA)
+          sed -i "s|path = '../functional'|url = \"https://github.com/abitofhelp/functional.git\", commit = \"49073c79001782352d280120c9a230bbef476206\"|" alire.toml
+          echo "Updated pin to use GitHub URL (functional v3.0.0)"
+          cat alire.toml
+
+      # -----------------------------------------------------------------------
+      # Build application
+      # -----------------------------------------------------------------------
+      - name: Build application
+        shell: bash
+        run: |
+          echo "Building entitlement for Windows..."
+          alr build -- -j4
+          echo "Build complete"
+
+      # -----------------------------------------------------------------------
+      # Build unit tests
+      # -----------------------------------------------------------------------
+      - name: Build unit tests
+        shell: bash
+        run: |
+          echo "Building unit tests..."
+          alr exec -- gprbuild -P test/unit/unit_tests.gpr -p -j4
+          echo "Unit tests build complete"
+
+      # -----------------------------------------------------------------------
+      # Build integration tests
+      # -----------------------------------------------------------------------
+      - name: Build integration tests
+        shell: bash
+        run: |
+          echo "Building integration tests..."
+          alr exec -- gprbuild -P test/integration/integration_tests.gpr -p -j4
+          echo "Integration tests build complete"
+
+      # -----------------------------------------------------------------------
+      # Build e2e tests
+      # -----------------------------------------------------------------------
+      - name: Build e2e tests
+        shell: bash
+        run: |
+          echo "Building e2e tests..."
+          alr exec -- gprbuild -P test/e2e/e2e_tests.gpr -p -j4
+          echo "E2E tests build complete"
+
+      # -----------------------------------------------------------------------
+      # Run unit tests
+      # -----------------------------------------------------------------------
+      - name: Run unit tests
+        shell: bash
+        run: |
+          echo "========================================"
+          echo "Running Unit Tests"
+          echo "========================================"
+          ./test/bin/unit_runner.exe
+          echo "Unit tests complete"
+
+      # -----------------------------------------------------------------------
+      # Run integration tests
+      # -----------------------------------------------------------------------
+      - name: Run integration tests
+        shell: bash
+        run: |
+          echo "========================================"
+          echo "Running Integration Tests"
+          echo "========================================"
+          ./test/bin/integration_runner.exe
+          echo "Integration tests complete"
+
+      # -----------------------------------------------------------------------
+      # Run e2e tests
+      # -----------------------------------------------------------------------
+      - name: Run e2e tests
+        shell: bash
+        run: |
+          echo "========================================"
+          echo "Running E2E Tests"
+          echo "========================================"
+          ./test/bin/e2e_runner.exe
+          echo "E2E tests complete"
+
+      # -----------------------------------------------------------------------
+      # Summary
+      # -----------------------------------------------------------------------
+      - name: Test Summary
+        if: always()
+        shell: bash
+        run: |
+          echo "========================================"
+          echo "Windows Release Validation Complete"
+          echo "========================================"
+          echo "Version: ${{ github.event.inputs.version || 'dev' }}"
+          echo "Ref: ${{ github.event.inputs.ref || github.ref }}"
+          echo "Platform: windows-latest"
+          echo "Alire: 2.0.2"
+          echo ""
+          echo "Tests executed:"
+          echo "  - Unit tests"
+          echo "  - Integration tests"
+          echo "  - E2E tests"

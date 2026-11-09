@@ -1,0 +1,36 @@
+-- ===========================================================================
+-- integration_tests.gpr - Integration Test Suite for Entitlement
+-- ===========================================================================
+-- Purpose:
+--   Integration test project for testing cross-layer interactions.
+--   Inherits settings from entitlement_shared_config.gpr for consistency.
+--
+-- Build: alr exec -- gprbuild -P test/integration/integration_tests.gpr -p
+--        make test-integration
+-- ===========================================================================
+
+with "../../entitlement_shared_config.gpr";
+with "../../config/entitlement_config.gpr";
+with "../../src/domain/domain.gpr";
+with "../../src/application/application.gpr";
+with "../../src/infrastructure/infrastructure.gpr";
+with "../../src/version/version.gpr";
+with "../../src/root/root.gpr";
+
+project Integration_Tests is
+
+   for Source_Dirs use (".", "../common");
+   for Object_Dir use "../../obj/test/integration";
+   for Exec_Dir use "../bin";
+
+   --  Only the runner is Main; individual tests are procedures it calls
+   for Main use ("integration_runner.adb");
+
+   package Compiler renames Entitlement_Shared_Config.Compiler;
+   package Binder renames Entitlement_Shared_Config.Binder;
+
+   package Builder is
+      for Switches ("Ada") use ("-g");  -- Debug symbols
+   end Builder;
+
+end Integration_Tests;

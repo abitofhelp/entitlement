@@ -1,0 +1,34 @@
+-- ===========================================================================
+-- e2e_tests.gpr - End-to-End Test Suite for Entitlement
+-- ===========================================================================
+-- Purpose:
+--   End-to-End test project for testing complete system through CLI.
+--   Tests execute the entitlement binary and verify output (black-box testing).
+--   Does NOT import application code - tests from user's perspective.
+--   Inherits settings from entitlement_shared_config.gpr for consistency.
+--
+-- Build: alr exec -- gprbuild -P test/e2e/e2e_tests.gpr -p
+--        make test-e2e
+-- ===========================================================================
+
+with "../../entitlement_shared_config.gpr";
+with "../../src/root/root.gpr";
+
+project E2E_Tests is
+
+   for Source_Dirs use (".", "../common");
+   for Object_Dir use "../../obj/test/e2e";
+   for Exec_Dir use "../bin";
+
+   --  Only the runner is Main; individual tests are procedures it calls
+   --  E2E tests should execute bin/entitlement and verify output
+   for Main use ("e2e_runner.adb");
+
+   package Compiler renames Entitlement_Shared_Config.Compiler;
+   package Binder renames Entitlement_Shared_Config.Binder;
+
+   package Builder is
+      for Switches ("Ada") use ("-g");  -- Debug symbols
+   end Builder;
+
+end E2E_Tests;

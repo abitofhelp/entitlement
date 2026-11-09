@@ -1,0 +1,28 @@
+-- ===========================================================================
+-- Entitlement.gpr - Hexagonal Architecture Entitlement (Aggregate Project)
+-- ===========================================================================
+-- Copyright (c) 2025 Michael Gardner, A Bit of Help, Inc.
+-- SPDX-License-Identifier: BSD-3-Clause
+--
+-- Purpose:
+--   Aggregate project that builds the entitlement executable via bootstrap.gpr.
+--   All compiler/linker settings are in entitlement_shared_config.gpr and
+--   layer-specific GPR files.
+--
+--   ARCHITECTURE ENFORCEMENT:
+--   Layer GPRs use Library_Standalone to enforce architectural boundaries:
+--   - Domain: No dependencies (innermost layer)
+--   - Application: Depends only on Domain
+--   - Infrastructure: Depends on Domain + Application
+--   - Presentation: Depends only on Application (NOT Domain directly)
+--   - Bootstrap: Composition root, produces executable
+--
+-- Build: alr build
+-- Output: bin/entitlement
+-- ===========================================================================
+
+aggregate project Entitlement is
+
+   for Project_Files use ("src/bootstrap/bootstrap.gpr");
+
+end Entitlement;
